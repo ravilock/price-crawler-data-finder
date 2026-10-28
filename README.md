@@ -37,8 +37,7 @@ make run
 `make deps.up` pulls selected dependencies and stops on failure; it never substitutes a
 cached image after a failed pull. The direct Compose command uses its normal pull policy;
 explicitly pull first when freshness/availability verification is required.
-Stateful host execution will require `make migrate.up` followed by `make migrate.version`
-once its migration task is delivered; do not treat this startup scaffold as migrated.
+This service does not own a database and has no local migration command.
 For Node services, run `npm install` before host execution. `make run` maps database/broker
 connections to the configured localhost ports, and binds the host process to `127.0.0.1`.
 
@@ -108,8 +107,8 @@ For a reversible source-only check, change one startup log message in
 (keep behavior unchanged).
 Stop the host process with Ctrl-C and run `make run` again to observe the new message
 in the terminal. For a container, run
-`docker compose --profile app up --build -d app` and inspect `docker compose logs app`
-. Revert the source edit and repeat.
+`docker compose --profile app up --build -d app` and inspect `docker compose logs app`.
+Revert the source edit and repeat.
 Go/Node container assets rebuild in the Dockerfile; the frontend host dev server rebuilds
 assets automatically. No migration is needed for this log/title edit.
 Run the repository's `make test lint build` checks before publishing changes.
@@ -137,11 +136,12 @@ and reconnects using exponential delays bounded by
 (default 30). The app-profile health check uses `/readyz`; readiness does not
 assert that a collection workflow or its future consumers are available.
 
-Infrastructure readiness is gated by authenticated PostgreSQL `SELECT 1`, RabbitMQ health,
-and Keycloak realm discovery with the expected issuer where selected. Application
-connection handling, migration gating and dependency-loss readiness are delivered by
-T073–T076/T085–T086/T105–T109. Current baseline worker images may exit until executable
-wiring is implemented. This guide does not claim those future acceptance checks passed.
+Infrastructure dependencies are health-gated as applicable. The checked-out app's
+health endpoints establish only the dependencies described above; they do not establish
+business workflow or integrated demo readiness. After catalog, alerts, or broker
+recovery, recurring group monitoring must wait for the synchronized demand watermark
+before its next recovered scheduling decision. That later workflow synchronization is
+not represented by process health and remains subject to its own acceptance checks.
 
 ## Verification — 2026-10-27
 
