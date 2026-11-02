@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"price-crawler/services/data-finder/internal/config"
+	"price-crawler/services/data-finder/internal/messaging"
 	"price-crawler/services/data-finder/internal/observability"
 )
 
@@ -27,11 +29,15 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 
-	// Business consumers are added with their corresponding workflow tasks.
+	var workerReady atomic.Bool
+	workerCtx, stopWorker := context.WithCancel(ctx)
+	workerDone := make(chan struct{})
+	go func() { defer close(workerDone); messaging.Run(workerCtx, cfg.RabbitMQURL, logger, &workerReady) }()
+	defer func() { stopWorker(); <-workerDone }()
 	pool := observability.NewWorkerPool(cfg.WorkerConcurrency)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		if !broker.Ready() {
+		if !broker.Ready() || !workerReady.Load() {
 			http.Error(w, "RabbitMQ unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -43,7 +49,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		_, _ = w.Write([]byte(`{"status":"alive"}`))
 	})
 	server := &http.Server{Addr: cfg.HTTPAddr, ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && !broker.Ready() {
+		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && (!broker.Ready() || !workerReady.Load()) {
 			http.Error(w, "RabbitMQ unavailable", http.StatusServiceUnavailable)
 			return
 		}
