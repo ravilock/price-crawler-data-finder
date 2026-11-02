@@ -150,3 +150,12 @@ passed. The current test target contains no service behavior tests yet. Minimum
 dependencies passed real `docker compose up --wait` in isolated project `local-check-data-finder-201fb811`,
 with host ports removed; normal shutdown retained its named volumes. This verifies
 dependency startup, not application, migration, demo or business-workflow readiness.
+
+Normalization profile `1` uses field-name-specific rules: `gtin` validates the
+GS1 modulo-10 check digit, `price` parses BRL decimal notation into integer
+cents, `payment_method` and `availability` map recognized terms, and text and
+attribute values are trimmed and bounded. Each returned candidate carries its
+source locator, bounded raw value, status, confidence and rejection reason;
+`normalization_version` identifies this rule set. An unrecognized payment method
+keeps an otherwise parseable price uncertain rather than verified. The finder
+never retrieves a source URL.
