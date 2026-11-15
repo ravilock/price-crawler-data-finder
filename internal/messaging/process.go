@@ -2,13 +2,13 @@ package messaging
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"io"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 
@@ -16,8 +16,6 @@ import (
 )
 
 const maxEnvelope = 1 << 20
-
-var uuid = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 type Envelope struct {
 	MessageID      string          `json:"message_id"`
@@ -75,13 +73,11 @@ func decode(raw []byte, target any) error {
 	return nil
 }
 func newID() (string, error) {
-	var id [16]byte
-	if _, err := rand.Read(id[:]); err != nil {
+	value, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	id[6] = (id[6] & 15) | 64
-	id[8] = (id[8] & 63) | 128
-	return fmt.Sprintf("%x-%x-%x-%x-%x", id[:4], id[4:6], id[6:8], id[8:10], id[10:]), nil
+	return value.String(), nil
 }
 
 // Process never fetches URLs; it validates and normalizes a single bounded page.
@@ -93,7 +89,7 @@ func Process(raw []byte) (Envelope, error) {
 	if err := decode(raw, &e); err != nil {
 		return Envelope{}, err
 	}
-	if !uuid.MatchString(e.MessageID) || !uuid.MatchString(e.OrganizationID) || !uuid.MatchString(e.CorrelationID) || e.SchemaVersion != 1 || e.MessageType != "product.find.requested" || e.OccurredAt.IsZero() || len(e.IdempotencyKey) > 200 || (e.CausationID != "" && !uuid.MatchString(e.CausationID)) {
+	if !validUUID(e.MessageID) || !validUUID(e.OrganizationID) || !validUUID(e.CorrelationID) || e.SchemaVersion != 1 || e.MessageType != "product.find.requested" || e.OccurredAt.IsZero() || len(e.IdempotencyKey) > 200 || (e.CausationID != "" && !validUUID(e.CausationID)) {
 		return Envelope{}, errors.New("invalid envelope")
 	}
 	var presence map[string]json.RawMessage
@@ -130,7 +126,7 @@ func Process(raw []byte) (Envelope, error) {
 		return Envelope{}, err
 	}
 	p := r.Page
-	if !uuid.MatchString(r.CrawlRequestID) || !uuid.MatchString(r.PageParsedMessageID) || r.CrawlRequestID != p.CrawlRequestID || len(r.NormalizationProfile) > 100 || p.ObservedAt.IsZero() || p.ParserVersion == "" || len(p.ParserVersion) > 100 || p.Fields == nil || len(p.Fields) > 500 || len(p.Metadata) > 200 || len(p.StructuredData) > 100 || (p.Outcome != "complete" && p.Outcome != "partial" && p.Outcome != "blocked" && p.Outcome != "unsupported" && p.Outcome != "failed") {
+	if !validUUID(r.CrawlRequestID) || !validUUID(r.PageParsedMessageID) || r.CrawlRequestID != p.CrawlRequestID || len(r.NormalizationProfile) > 100 || p.ObservedAt.IsZero() || p.ParserVersion == "" || len(p.ParserVersion) > 100 || p.Fields == nil || len(p.Fields) > 500 || len(p.Metadata) > 200 || len(p.StructuredData) > 100 || (p.Outcome != "complete" && p.Outcome != "partial" && p.Outcome != "blocked" && p.Outcome != "unsupported" && p.Outcome != "failed") {
 		return Envelope{}, errors.New("invalid page")
 	}
 	if p.HTTPStatus != nil && (*p.HTTPStatus < 100 || *p.HTTPStatus > 599) || p.ContentType != nil && len(*p.ContentType) > 200 {
@@ -262,4 +258,14 @@ func Process(raw []byte) (Envelope, error) {
 		return Envelope{}, err
 	}
 	return Envelope{MessageID: id, MessageType: "product.information.found", SchemaVersion: 1, OccurredAt: time.Now().UTC(), OrganizationID: e.OrganizationID, CorrelationID: e.CorrelationID, CausationID: e.MessageID, Payload: payload}, nil
+}
+
+var uuidValidator = validator.New()
+
+func validUUID(value string) bool {
+	if uuidValidator.Var(value, "uuid") != nil {
+		return false
+	}
+	parsed, err := uuid.Parse(value)
+	return err == nil && parsed.Version() >= 1 && parsed.Version() <= 8 && parsed.Variant() == uuid.RFC4122
 }
